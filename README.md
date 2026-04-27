@@ -1,5 +1,7 @@
 # Job Scheduler — Assignment
 
+To clone the repo, set up a virtual environment, install dependencies, run ChronoFlow, and execute the test suite, follow **[RUNNING.md](RUNNING.md)**.
+
 ## Problem Statement
 
 Modern applications need to run background tasks on a predefined schedule. These tasks range from sending daily email digests and generating reports to performing routine data cleanup. A reliable and dynamic job scheduler is a critical component for automating these workflows.
