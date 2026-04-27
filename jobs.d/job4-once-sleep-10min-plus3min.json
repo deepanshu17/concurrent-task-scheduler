@@ -5,6 +5,6 @@
   "task": {
     "type": "execute_command",
     "command": "sleep 600",
-    "timeout": 720
+    "timeout_sec": 720
   }
 }

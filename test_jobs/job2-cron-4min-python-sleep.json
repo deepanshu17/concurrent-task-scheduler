@@ -4,7 +4,7 @@
   "schedule": "*/4 * * * *",
   "task": {
     "type": "execute_command",
-    "command": "python -c 'import time; print(\"cron job 2 start\"); time.sleep(120); print(\"cron job 2 done\")'"
-  },
-  "timeout": 150
+    "command": "python -c 'import time; print(\"cron job 2 start\"); time.sleep(120); print(\"cron job 2 done\")'",
+    "timeout_sec": 150
+  }
 }
