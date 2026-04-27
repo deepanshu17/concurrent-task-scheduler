@@ -1,0 +1,9 @@
+{
+  "job_id": "test-cron-job-2",
+  "description": "Cron job 2 — python script with 2-minute sleep, runs every 4 minutes",
+  "schedule": "*/4 * * * *",
+  "task": {
+    "type": "execute_command",
+    "command": "python -c 'import time; print(\"cron job 2 start\"); time.sleep(120); print(\"cron job 2 done\")'"
+  }
+}

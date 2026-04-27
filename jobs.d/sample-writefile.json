@@ -1,0 +1,11 @@
+{
+  "job_id": "sample-writefile",
+  "description": "Example write file job",
+  "schedule": "0 0 * * *",
+  "task": {
+    "type": "write_file",
+    "path": "./chronoflow-sample.txt",
+    "content": "hello from chronoflow\n",
+    "mode": "append"
+  }
+}
