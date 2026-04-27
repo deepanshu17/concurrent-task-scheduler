@@ -4,6 +4,7 @@
   "schedule": "2026-04-27T18:09:00+05:30",
   "task": {
     "type": "execute_command",
-    "command": "sleep 600"
+    "command": "sleep 600",
+    "timeout": 720
   }
 }
