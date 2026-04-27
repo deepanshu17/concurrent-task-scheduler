@@ -1,0 +1,10 @@
+{
+  "job_id": "sample-sql",
+  "description": "Example SQL job",
+  "schedule": "0 3 * * *",
+  "task": {
+    "type": "execute_sql",
+    "db_url": "sqlite:///app.db",
+    "query": "SELECT 1"
+  }
+}

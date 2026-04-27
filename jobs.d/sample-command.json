@@ -1,0 +1,9 @@
+{
+  "job_id": "sample-command",
+  "description": "Example command job",
+  "schedule": "*/30 * * * * *",
+  "task": {
+    "type": "execute_command",
+    "command": "echo hello"
+  }
+}

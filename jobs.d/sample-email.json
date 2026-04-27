@@ -1,0 +1,14 @@
+{
+  "job_id": "sample-email",
+  "description": "Example email job",
+  "schedule": "0 9 * * *",
+  "task": {
+    "type": "send_email",
+    "smtp_host": "localhost",
+    "smtp_port": 1025,
+    "from": "scheduler@local",
+    "to": ["ops@local"],
+    "subject": "Hello from ChronoFlow",
+    "body": "This is a sample email task."
+  }
+}

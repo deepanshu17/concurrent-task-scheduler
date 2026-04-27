@@ -1,0 +1,11 @@
+{
+  "job_id": "sample-http",
+  "description": "Example HTTP request job",
+  "schedule": "* * * * *",
+  "task": {
+    "type": "http_request",
+    "method": "GET",
+    "url": "https://httpbin.org/get",
+    "headers": {}
+  }
+}
