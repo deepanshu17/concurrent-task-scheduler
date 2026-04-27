@@ -3,8 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from tasks.execute_command import ExecuteCommandExecutor
 from tasks.execute_sql import ExecuteSQLExecutor
 from tasks.http_request import HttpRequestExecutor

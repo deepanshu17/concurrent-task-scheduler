@@ -1,8 +1,8 @@
 # ChronoFlow — Implementation Plan
 
 > Author: Senior SRE  
-> Status: **Pre-implementation — awaiting answers to open questions before coding begins**  
-> Scope: Full system skeleton + fully operational `execute_command` and `http_request` executors. The remaining three executors (`execute_sql`, `send_email`, `write_file`) are stubbed safely so the system loads, runs, and logs without crashing.
+> Status: **Implemented** — all five task executors are functional; scheduler, watcher, and execution logger match this document.  
+> Scope: In-memory scheduling (APScheduler), JSON jobs under `JOBS_DIR`, watchdog-driven reloads, and stdlib-backed executors for all supported `task.type` values.
 
 ---
 
@@ -15,7 +15,7 @@
 | **Fail loudly at config time, silently at runtime** | Bad JSON → logged + skipped at startup; unknown `task_type` → `FAILURE` result, not an exception                                                                                                                                                          |
 | **Pluggable by design**                             | Adding a new executor = one new file + one line in `registry.py`. Zero changes elsewhere                                                                                                                                                                  |
 | **Observable**                                      | Every execution (success or failure) produces a structured JSON log line; human-readable console logs also emitted via stdlib `logging`                                                                                                                   |
-| **Stub, don't remove**                              | Unimplemented executors (`execute_sql`, `send_email`, `write_file`) return a `FAILURE` result with a clear `"not_implemented"` message — they are registered in `TASK_REGISTRY` and the system routes to them correctly; they just don't do real work yet |
+| **Executor errors stay inside the job**             | Each executor catches failures and returns `ExecutionResult(status="FAILURE", output=...)`; `run_job` only sees a traceback if `execute()` itself raises |
 
 
 ---
@@ -131,10 +131,12 @@ Wraps APScheduler's `BackgroundScheduler` with a `ThreadPoolExecutor`.
 ```
 run_job(job)
   │
+  ├── config = {**job.task_config, "job_id": job.job_id}
+  │
   ├── executor_cls = TASK_REGISTRY.get(job.task_type)
   │     └── if None → result = ExecutionResult(status="FAILURE", output="unknown task type: ...")
   │
-  ├── result = executor_cls().execute(job.task_config)   # wrapped in try/except
+  ├── result = executor_cls().execute(config)   # wrapped in try/except
   │     └── any unhandled exception → result = FAILURE with traceback string
   │
   └── execution_logger.log(result)
@@ -171,21 +173,21 @@ No constructor arguments. Each executor is stateless — instantiated fresh on e
 
 ### 5.2 `tasks/registry.py` — TASK_REGISTRY
 
-All five types are registered unconditionally. The three stubs are live entries that return `FAILURE("not implemented")` — they do not raise, they do not skip, they produce observable log records.
+All five types are registered unconditionally. Each executor is stateless and returns `SUCCESS` or `FAILURE` with a string `output`.
 
 ```python
 TASK_REGISTRY: dict[str, type[TaskExecutor]] = {
     "execute_command": ExecuteCommandExecutor,
     "http_request":    HttpRequestExecutor,
-    "execute_sql":     ExecuteSQLExecutor,      # stub
-    "send_email":      SendEmailExecutor,       # stub
-    "write_file":      WriteFileExecutor,       # stub
+    "execute_sql":     ExecuteSQLExecutor,
+    "send_email":      SendEmailExecutor,
+    "write_file":      WriteFileExecutor,
 }
 ```
 
 ---
 
-## 6. Implemented Executors (Phase 1)
+## 6. Implemented Executors
 
 ### 6.1 `execute_command`
 
@@ -195,25 +197,25 @@ TASK_REGISTRY: dict[str, type[TaskExecutor]] = {
 | Key       | Type   | Required | Default                | Notes                                      |
 | --------- | ------ | -------- | ---------------------- | ------------------------------------------ |
 | `command` | `str`  | yes      | —                      | Full shell command string                  |
-| `timeout` | `int`  | no       | `CMD_TIMEOUT_SEC` (60) | Seconds before `subprocess.TimeoutExpired` |
-| `shell`   | `bool` | no       | `true`                 | See security note                          |
+| `timeout_sec` | `int` / `float` | no | `300` | Seconds before `subprocess.TimeoutExpired` |
+| `shell`   | `bool` | no       | `true`                 | If `true`, command runs through the shell; if `false`, `shlex.split` + argv list |
+| `output_limit` | `int` | no | `4096` | Max combined stdout+stderr characters stored in `output` |
 
 
 **Implementation notes:**
 
-- Uses `subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout)`
-- `shell=True` is the pragmatic default — matches the README examples (`rm -rf /tmp/...`, pipeline commands). SRE context: we own the job files, this is not a public API.
-- `output` field contains `stdout` on success; `stderr` (or combined) on failure
-- `returncode != 0` → `FAILURE`; `TimeoutExpired` → `FAILURE` with clear message
-- stdout is truncated to **4 096 chars** in the log to prevent log bloat from verbose scripts
+- Uses `subprocess.run(..., timeout=timeout_sec)` where `timeout_sec` comes from `tasks.timeout_config.timeout_sec_from_config`
+- Default `shell=True` supports pipelines and shell features when job authors need them; set `shell=false` for argv-only execution
+- `output` combines stdout and stderr (truncated to `output_limit`)
+- `returncode != 0` → `FAILURE`; `TimeoutExpired` → `FAILURE` with a timeout message
 
 **Result mapping:**
 
 ```
-returncode == 0      → SUCCESS, output = stdout[:4096]
-returncode != 0      → FAILURE, output = f"exit {rc}: {stderr[:4096]}"
-TimeoutExpired       → FAILURE, output = f"timed out after {timeout}s"
-Exception            → FAILURE, output = traceback string
+returncode == 0      → SUCCESS, output = combined stdout+stderr (truncated)
+returncode != 0      → FAILURE, output = combined stdout+stderr (truncated)
+TimeoutExpired       → FAILURE, timeout message
+Exception            → FAILURE, output = str(exception)
 ```
 
 ### 6.2 `http_request`
@@ -223,53 +225,77 @@ Exception            → FAILURE, output = traceback string
 
 | Key          | Type         | Required | Default                 | Notes                                                             |
 | ------------ | ------------ | -------- | ----------------------- | ----------------------------------------------------------------- |
-| `method`     | `str`        | yes      | —                       | GET / POST / PUT / DELETE / PATCH                                 |
+| `method`     | `str`        | no       | `GET`                   | GET / POST / PUT / DELETE / PATCH                                 |
 | `url`        | `str`        | yes      | —                       | Full URL                                                          |
 | `headers`    | `dict`       | no       | `{}`                    | Merged with auto-set headers                                      |
 | `body`       | `dict | str` | no       | `None`                  | If dict → JSON-encoded; `Content-Type: application/json` auto-set |
-| `timeout`    | `int`        | no       | `HTTP_TIMEOUT_SEC` (30) | Seconds                                                           |
-| `verify_ssl` | `bool`       | no       | `true`                  | Set to false only for internal endpoints                          |
+| `timeout_sec` | `int` / `float` | no    | `30` | Seconds for `urlopen` timeout |
+| `verify_ssl` | `bool`       | no       | `true`                  | If `false`, uses an unverified SSL context (internal endpoints only) |
+| `output_limit` | `int` | no | `4096` | Max response body bytes read into `output` |
 
 
 **Implementation notes:**
 
 - Uses `urllib.request.urlopen` with a manually built `urllib.request.Request` object
 - If `body` is a `dict`, it is JSON-serialised and `Content-Type: application/json` is added
-- Response body is decoded (UTF-8, errors=`replace`) and truncated to **4 096 chars**
+- Response body is read up to `output_limit` bytes (plus one byte to detect overflow), decoded as UTF-8 (`errors=replace`), then truncated in the stored string if needed
 - HTTP 4xx / 5xx status codes → `FAILURE` (urllib raises `HTTPError` for these)
 - `URLError` (DNS failure, connection refused, timeout) → `FAILURE`
-- SSL: `verify_ssl=false` creates an unverified `ssl.SSLContext` — logged at WARNING level when used
+- SSL: `verify_ssl=false` creates an unverified `ssl.SSLContext`
 
 **Result mapping:**
 
 ```
-2xx response         → SUCCESS, output = f"HTTP {status}: {body[:4096]}"
-HTTPError (4xx/5xx)  → FAILURE, output = f"HTTP {status}: {reason}"
-URLError             → FAILURE, output = f"connection error: {reason}"
-TimeoutError         → FAILURE, output = f"timed out after {timeout}s"
-Exception            → FAILURE, output = traceback string
+2xx response         → SUCCESS, output includes status and decoded body (truncated)
+HTTPError (4xx/5xx)  → FAILURE (raised by urllib)
+URLError / timeouts  → FAILURE, connection / timeout message from exception
+Exception            → FAILURE, output = str(exception)
 ```
 
----
+### 6.3 `execute_sql`
 
-## 7. Stub Executors (Phase 2 — safe placeholders)
+**Config keys:**
 
-`execute_sql`, `send_email`, and `write_file` each follow this exact pattern:
+| Key | Type | Required | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `db_url` | `str` | yes | — | `sqlite:///path`, `sqlite:///:memory:`, `:memory:`, or a bare filesystem path |
+| `query` | `str` | yes | — | Single SQL statement |
+| `max_rows` | `int` | no | `50` | For `SELECT`-like results, max rows fetched into the success `output` preview |
 
-```python
-class ExecuteSQLExecutor(TaskExecutor):
-    def execute(self, config: dict) -> ExecutionResult:
-        return ExecutionResult(
-            job_id=config.get("_job_id", "unknown"),
-            executed_at=datetime.utcnow(),
-            status="FAILURE",
-            output="execute_sql is not yet implemented",
-        )
-```
+**Behaviour:**
 
-**Why `FAILURE` and not a silent skip?** It surfaces in the execution log so operators know a job is defined but non-functional — preferable to silent success that hides misconfiguration.
+- Opens SQLite via `sqlite3.connect`
+- If the statement looks like a read query (`SELECT` prefix or cursor has `description`), fetches up to `max_rows` rows and returns column names + row preview in `output`
+- Otherwise commits and reports `rows_affected` using `total_changes` when available, else `cursor.rowcount`
 
-> **Note on `_job_id` in config**: `run_job` injects `_job_id` into `task_config` before passing to the executor. This avoids the executor needing access to the `Job` dataclass directly.
+### 6.4 `send_email`
+
+**Config keys:**
+
+| Key | Type | Required | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `smtp_host` | `str` | yes | — | |
+| `smtp_port` | `int` | yes | — | |
+| `from` | `str` | yes | — | Sender address |
+| `to` | `list[str]` | yes | — | Non-empty list of recipients |
+| `subject` | `str` | no | `""` | |
+| `body` | `str` | no | `""` | Plain-text body |
+| `timeout_sec` | `int` / `float` | no | `30` | SMTP socket timeout |
+| `username` | `str` | no | — | If both `username` and `password` are non-empty, `SMTP.login` is called |
+| `password` | `str` | no | — | Used with `username` for `SMTP.login` |
+
+### 6.5 `write_file`
+
+**Config keys:**
+
+| Key | Type | Required | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `path` | `str` | yes | — | File path |
+| `content` | `str` | no | `""` | Written as text |
+| `mode` | `str` | no | `overwrite` | `append` or `overwrite`; aliases `write` / `w` → overwrite, `a` → append |
+| `encoding` | `str` | no | `utf-8` | |
+
+**Behaviour:** Creates parent directories as needed; opens file in append or write mode.
 
 ---
 
@@ -295,7 +321,7 @@ One JSON object per line (NDJSON / JSON Lines) written to `LOG_FILE`:
 | Field         | Type                    | Notes                                                |
 | ------------- | ----------------------- | ---------------------------------------------------- |
 | `job_id`      | `str`                   | From `ExecutionResult`                               |
-| `executed_at` | `str`                   | ISO 8601 UTC (`datetime.utcnow().isoformat() + "Z"`) |
+| `executed_at` | `str`                   | ISO 8601 from `ExecutionResult.executed_at` (append `Z` only if naive) |
 | `status`      | `"SUCCESS" | "FAILURE"` | From `ExecutionResult`                               |
 | `output`      | `str`                   | Truncated to 4 096 chars before write                |
 
@@ -322,56 +348,52 @@ Signal handling: `SIGINT` and `SIGTERM` both call `scheduler.shutdown()` + `obse
 
 ## 10. Testing Plan
 
-### Phase 1 test scope (matches current implementation scope)
+### Current test scope
 
 
 | File                             | Coverage focus                                                                                                                                               |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `tests/test_job_parser.py`       | Valid cron, valid ISO 8601, missing keys, malformed JSON, unknown task type                                                                                  |
-| `tests/test_executors.py`        | `execute_command`: success, non-zero exit, timeout; `http_request`: 2xx success, 4xx, 5xx, DNS failure, JSON body encoding; stub executors: return `FAILURE` |
+| `tests/test_executors.py`        | Happy-path smoke for all five executors with stdlib calls mocked (`subprocess`, `sqlite3`, `smtplib`, `urllib`) or `tmp_path` for `write_file`               |
 | `tests/test_scheduler_core.py`   | `add_job`, `remove_job`, duplicate job_id, unknown task_type routing                                                                                         |
 | `tests/test_watcher.py`          | created/modified/deleted events trigger correct scheduler calls                                                                                              |
 | `tests/test_execution_logger.py` | Log line is valid JSON, all fields present, file append mode                                                                                                 |
 
 
-### What we do NOT test yet
+### What we do NOT test (by design in this repo)
 
-- `execute_sql`, `send_email`, `write_file` real execution (stubs only)
-- Live cron scheduling (we mock APScheduler — no real waits)
-- High-concurrency race conditions (unit test scope)
+- Live cron waits, real remote HTTP/SMTP, or production-sized concurrency (unit scope only)
 
 ### Key mocking strategy
 
 ```
 subprocess.run          → mock for execute_command
+sqlite3.connect       → mock for execute_sql (lightweight fake connection)
+smtplib.SMTP          → mock for send_email
 urllib.request.urlopen  → mock for http_request
 apscheduler.schedulers  → MagicMock for scheduler core
 watchdog events         → instantiate handler directly, call on_created/on_modified/on_deleted
-open() / file writes    → mock or tmp_path for logger
+open() / file writes    → mock or tmp_path for logger / write_file
 ```
 
 ---
 
-## 11. File-by-File Implementation Order
+## 11. File layout (reference)
+
+Typical layout after implementation:
 
 1. `requirements.txt` + `config.py` + `models.py`
-2. `scheduler/job.py` (parser + trigger factory)
-3. `scheduler/core.py` (APScheduler wrapper)
-4. `tasks/base.py` + `tasks/registry.py`
-5. `tasks/execute_command.py` ← **fully implemented**
-6. `tasks/http_request.py` ← **fully implemented**
-7. `tasks/execute_sql.py` + `tasks/send_email.py` + `tasks/write_file.py` ← **stubs**
-8. `logger/execution_logger.py`
-9. `scheduler/watcher.py`
-10. `main.py`
-11. `tests/` (all five files)
-12. `jobs.d/` sample files (one for each implemented task type)
+2. `scheduler/job.py`, `scheduler/core.py`, `scheduler/watcher.py`
+3. `tasks/base.py`, `tasks/registry.py`, `tasks/timeout_config.py`, and one module per executor
+4. `logger/execution_logger.py`
+5. `main.py`
+6. `tests/` and `jobs.d/` / `test_jobs/` sample JSON
 
 ---
 
-## 12. Open Questions (answers needed before coding)
+## 12. Open questions
 
-See the companion section below — these affect code-level decisions.
+None tracked in this document — behaviour is defined by the code and tests in-repo.
 
 ---
 
@@ -408,12 +430,12 @@ See the companion section below — these affect code-level decisions.
 }
 ```
 
-### `jobs.d/sample-sql-stub.json`
+### `jobs.d/sample-sql.json` (example)
 
 ```json
 {
-  "job_id": "sql-stub-demo",
-  "description": "Will log FAILURE/not-implemented until Phase 2",
+  "job_id": "sql-maintenance",
+  "description": "Example SQL job",
   "schedule": "0 3 * * *",
   "task": {
     "type": "execute_sql",

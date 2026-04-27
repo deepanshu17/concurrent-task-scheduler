@@ -173,6 +173,10 @@ Place any `.json` file inside `jobs.d/` with this structure:
 | Cron string | `0 2 * * *` | Recurring — daily at 02:00 UTC |
 | ISO 8601 | `2026-10-01T09:00:00+05:30` | One-time — fires once at that timestamp |
 
+### Timeouts in task JSON
+
+Use **`timeout_sec`** (number of seconds) when a task supports it (`execute_command`, `http_request`, `send_email`). If omitted, each executor uses its built-in default.
+
 ### Supported task types
 
 **`execute_command`** — run a shell command
@@ -181,7 +185,7 @@ Place any `.json` file inside `jobs.d/` with this structure:
 {
   "type": "execute_command",
   "command": "echo hello",
-  "timeout": 60,
+  "timeout_sec": 60,
   "shell": true
 }
 ```
@@ -195,7 +199,7 @@ Place any `.json` file inside `jobs.d/` with this structure:
   "url": "https://hooks.example.com/notify",
   "headers": { "X-Source": "chronoflow" },
   "body": { "status": "alive" },
-  "timeout": 30,
+  "timeout_sec": 30,
   "verify_ssl": true
 }
 ```
@@ -221,6 +225,7 @@ Place any `.json` file inside `jobs.d/` with this structure:
   "to": ["ops@local"],
   "subject": "Scheduled report",
   "body": "See attached.",
+  "timeout_sec": 30,
   "username": "optional",
   "password": "optional"
 }

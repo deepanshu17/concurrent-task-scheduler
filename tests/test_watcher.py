@@ -6,7 +6,8 @@ from types import SimpleNamespace
 from models import Job
 from scheduler.watcher import JobFileHandler
 
-def test_watcher_created_loads_and_schedules(tmp_path: Path, mock_scheduler) -> None:
+
+def test_watcher_created_loads_and_schedules(tmp_path: Path, mock_scheduler, monkeypatch) -> None:
     jobs_dir = tmp_path / "jobs.d"
     jobs_dir.mkdir()
     handler = JobFileHandler(scheduler=mock_scheduler, jobs_dir=jobs_dir)
@@ -20,24 +21,19 @@ def test_watcher_created_loads_and_schedules(tmp_path: Path, mock_scheduler) -> 
         source_file=job_file,
     )
 
-    import scheduler.watcher as watcher_mod
-
     def _fake_parse_job(_path: Path):
         return [job]
 
-    watcher_mod.parse_job = None  # type: ignore[attr-defined]
-
-    # monkeypatch via local import inside handler._load_and_schedule:
     import scheduler.job as job_mod
 
-    job_mod.parse_job = _fake_parse_job  # type: ignore[assignment]
+    monkeypatch.setattr(job_mod, "parse_job", _fake_parse_job)
 
     event = SimpleNamespace(is_directory=False, src_path=str(job_file))
     handler.on_created(event)
     mock_scheduler.add_job.assert_called_once_with(job)
 
 
-def test_watcher_modified_removes_then_adds(tmp_path: Path, mock_scheduler) -> None:
+def test_watcher_modified_removes_then_adds(tmp_path: Path, mock_scheduler, monkeypatch) -> None:
     jobs_dir = tmp_path / "jobs.d"
     jobs_dir.mkdir()
     handler = JobFileHandler(scheduler=mock_scheduler, jobs_dir=jobs_dir)
@@ -53,7 +49,7 @@ def test_watcher_modified_removes_then_adds(tmp_path: Path, mock_scheduler) -> N
 
     import scheduler.job as job_mod
 
-    job_mod.parse_job = lambda _p: [job]  # type: ignore[assignment]
+    monkeypatch.setattr(job_mod, "parse_job", lambda _p: [job])
 
     event = SimpleNamespace(is_directory=False, src_path=str(job_file))
     handler.on_modified(event)

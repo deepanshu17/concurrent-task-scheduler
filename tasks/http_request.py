@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import ssl
 import urllib.request
 from datetime import datetime, timezone
 
 from models import ExecutionResult
 from tasks.base import TaskExecutor
+from tasks.timeout_config import timeout_sec_from_config
 
 
 class HttpRequestExecutor(TaskExecutor):
@@ -15,7 +17,11 @@ class HttpRequestExecutor(TaskExecutor):
         url = config.get("url")
         headers = config.get("headers", {}) or {}
         body = config.get("body", None)
-        timeout_sec = config.get("timeout_sec", 30)
+        timeout_sec = timeout_sec_from_config(config, default=30.0)
+        verify_ssl = config.get("verify_ssl", True)
+        output_limit = int(config.get("output_limit", 4096))
+        if output_limit < 1:
+            output_limit = 4096
 
         if not isinstance(url, str) or not url.strip():
             return ExecutionResult(
@@ -46,10 +52,24 @@ class HttpRequestExecutor(TaskExecutor):
             req.add_header(str(k), str(v))
 
         try:
-            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+            context = None
+            if isinstance(verify_ssl, bool) and not verify_ssl:
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+
+            with urllib.request.urlopen(req, timeout=timeout_sec, context=context) as resp:
                 status_code = getattr(resp, "status", None)
-                raw = resp.read()
+                try:
+                    raw = resp.read(output_limit + 1)
+                except TypeError:
+                    raw = resp.read()
+                truncated = len(raw) > output_limit
+                if truncated:
+                    raw = raw[:output_limit]
                 text = raw.decode("utf-8", errors="replace")
+                if truncated:
+                    text = text + "…(truncated)"
                 return ExecutionResult(
                     job_id=job_id,
                     executed_at=datetime.now(timezone.utc),

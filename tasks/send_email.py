@@ -6,6 +6,7 @@ from email.message import EmailMessage
 
 from models import ExecutionResult
 from tasks.base import TaskExecutor
+from tasks.timeout_config import timeout_sec_from_config
 
 
 class SendEmailExecutor(TaskExecutor):
@@ -18,7 +19,9 @@ class SendEmailExecutor(TaskExecutor):
         recipients = config.get("to")
         subject = config.get("subject", "")
         body = config.get("body", "")
-        timeout_sec = config.get("timeout_sec", 30)
+        timeout_sec = timeout_sec_from_config(config, default=30.0)
+        username = config.get("username")
+        password = config.get("password")
 
         if not isinstance(smtp_host, str) or not smtp_host.strip():
             return ExecutionResult(
@@ -57,6 +60,8 @@ class SendEmailExecutor(TaskExecutor):
             msg.set_content(str(body))
 
             with smtplib.SMTP(host=smtp_host, port=smtp_port, timeout=timeout_sec) as smtp:
+                if isinstance(username, str) and username and isinstance(password, str) and password:
+                    smtp.login(username, password)
                 smtp.send_message(msg)
 
             return ExecutionResult(

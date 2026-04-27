@@ -12,7 +12,7 @@ class WriteFileExecutor(TaskExecutor):
         job_id = str(config.get("job_id", ""))
         path = config.get("path")
         content = config.get("content", "")
-        mode = config.get("mode", "append")
+        mode = config.get("mode", "overwrite")
         encoding = config.get("encoding", "utf-8")
 
         if not isinstance(path, str) or not path.strip():
@@ -22,6 +22,11 @@ class WriteFileExecutor(TaskExecutor):
                 status="FAILURE",
                 output="missing or invalid 'path'",
             )
+
+        if mode in ("write", "w", None):
+            mode = "overwrite"
+        if mode in ("a",):
+            mode = "append"
         if mode not in ("append", "overwrite"):
             return ExecutionResult(
                 job_id=job_id,

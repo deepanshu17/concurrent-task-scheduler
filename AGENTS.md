@@ -209,6 +209,8 @@ def make_trigger(schedule: str):
 
 ### Per-task config fields
 
+For **`execute_command`**, **`http_request`**, and **`send_email`**, optional **`timeout_sec`** sets the operation timeout in seconds (defaults are defined in each executor).
+
 **`execute_command`**
 ```json
 { "type": "execute_command", "command": "echo hello" }
