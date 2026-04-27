@@ -1,6 +1,8 @@
 # Job Scheduler — Assignment
 
-To clone the repo, set up a virtual environment, install dependencies, run ChronoFlow, and execute the test suite, follow **[RUNNING.md](RUNNING.md)**.
+A lightweight in-memory Python job scheduler that loads JSON job definitions from a watched directory, runs tasks on cron or one-time schedules with concurrency, and updates the schedule when job files are added, modified, or deleted—no database, no restart.
+
+To clone the repo, set up a virtual environment, install dependencies, start the scheduler (`python main.py`), and run the test suite, follow **[RUNNING.md](RUNNING.md)**.
 
 ## Problem Statement
 
@@ -8,7 +10,7 @@ Modern applications need to run background tasks on a predefined schedule. These
 
 ## Objective
 
-Design and implement **ChronoFlow**, a lightweight, in-memory job scheduling service. The service will read job definitions from a configuration directory, execute the defined tasks according to their specified schedules, and log the outcomes.
+Design and implement a lightweight, in-memory job scheduling service. The service will read job definitions from a configuration directory, execute the defined tasks according to their specified schedules, and log the outcomes.
 
 ---
 
@@ -16,7 +18,7 @@ Design and implement **ChronoFlow**, a lightweight, in-memory job scheduling ser
 
 ### 1. Dynamic Job Management
 
-The scheduler must monitor a directory (e.g., `/etc/chronoflow/jobs.d/`) for job definition files in JSON format. It must react to file system changes **without requiring a service restart**:
+The scheduler must monitor a directory (e.g., `/etc/scheduler/jobs.d/`) for job definition files in JSON format. It must react to file system changes **without requiring a service restart**:
 
 | Event | Behaviour |
 |-------|-----------|
