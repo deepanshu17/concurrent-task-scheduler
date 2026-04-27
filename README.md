@@ -1,6 +1,6 @@
-# Job Scheduler — Assignment
+# Concurrent Task Scheduler
 
-A lightweight in-memory Python job scheduler that loads JSON job definitions from a watched directory, runs tasks on cron or one-time schedules with concurrency, and updates the schedule when job files are added, modified, or deleted—no database, no restart.
+A lightweight in-memory Python job scheduler that loads JSON job definitions from a watched directory, runs tasks on cron or one-time schedules with concurrency, and updates the schedule when job files are added, modified, or deleted - no database, no restart.
 
 To clone the repo, set up a virtual environment, install dependencies, start the scheduler (`python main.py`), and run the test suite, follow **[RUNNING.md](RUNNING.md)**.
 
@@ -20,11 +20,13 @@ Design and implement a lightweight, in-memory job scheduling service. The servic
 
 The scheduler must monitor a directory (e.g., `/etc/scheduler/jobs.d/`) for job definition files in JSON format. It must react to file system changes **without requiring a service restart**:
 
-| Event | Behaviour |
-|-------|-----------|
-| New file added | Job is immediately parsed and added to the schedule |
+
+| Event                  | Behaviour                                              |
+| ---------------------- | ------------------------------------------------------ |
+| New file added         | Job is immediately parsed and added to the schedule    |
 | Existing file modified | Scheduler updates or reschedules the corresponding job |
-| File deleted | Job is removed from the schedule |
+| File deleted           | Job is removed from the schedule                       |
+
 
 ### 2. Flexible Scheduling Formats
 
