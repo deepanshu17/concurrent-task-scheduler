@@ -7,6 +7,4 @@ from models import ExecutionResult
 
 class TaskExecutor(ABC):
     @abstractmethod
-    def execute(self, config: dict) -> ExecutionResult:
-        raise NotImplementedError
-
+    def execute(self, config: dict) -> ExecutionResult: ...

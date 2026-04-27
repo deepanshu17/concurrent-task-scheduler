@@ -14,4 +14,3 @@ TASK_REGISTRY: dict[str, type[TaskExecutor]] = {
     "http_request": HttpRequestExecutor,
     "write_file": WriteFileExecutor,
 }
-
